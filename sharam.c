@@ -13,7 +13,6 @@ enum {
     MAXLINE = 2048, //Retrieved from getconf LINE_MAX in my terminal
 };
 
-
 typedef struct command{
     int type;
     char* path;
@@ -35,11 +34,12 @@ int main(int argc, char *argv[]) {
     char line[MAXLINE];
     char pwd[PATH_MAX];
     char* token, *varToken;
-    char* duptoken;
     char* saveptr, *saveptr2;
     localVariables* local_var = (localVariables*)malloc(sizeof(localVariables));
     int local_var_size = 0;
-    char** arguments = malloc(sizeof(char*));
+    int arg_capacity = 10; //Intial argument capacity will be 10, in case it isn't enough, it will realloc the double
+    int arg_count = 0;
+    char** arguments = malloc(arg_capacity * sizeof(char*));
     int i,j;
     int active = 1;
     command cmd;
@@ -55,13 +55,17 @@ int main(int argc, char *argv[]) {
 }
             //First we separate by lines
             for(i=0,token = strtok_r(line, " ",&saveptr);token != NULL; token = strtok_r(NULL, " ",&saveptr),i++){
+                if(i >= arg_capacity){
+                    arg_capacity *= 2; //Duplicate capacity
+                    arguments = realloc(arguments, arg_capacity * sizeof(char*));
+                }
                 printf("token: %s\n", token);
-                duptoken = strdup(token);
-                arguments[i] = duptoken;
+                arguments[i] = strdup(token);
+                arg_count++;
                 //Then we seprate by equals symbols
                 for(j=0,varToken = strtok_r(token,"=",&saveptr2); varToken != NULL; varToken = strtok_r(NULL,"=",&saveptr2),j++){
                     break;
-                    if(strcmp(varToken, duptoken) == 0){
+                    if(strcmp(varToken, arguments[i]) == 0){
                         continue;
                     }
                     else if(j){
@@ -74,10 +78,9 @@ int main(int argc, char *argv[]) {
                         local_var[local_var_size].name = varToken;
                     }
                 }
-                //free(duptoken);
             }
         }
-        for(i=0; arguments[i] != NULL; i++){
+        for(i=0; i < arg_count; i++){
             printf("arg[%d]: %s\n", i, arguments[i]);
         }
         cmd = lookCommand(arguments[0]);
@@ -89,7 +92,8 @@ int main(int argc, char *argv[]) {
                 printf("Builtin found\n");
                 switch(cmd.builtinIndex){
                     case 0:
-                        exitShell(&active);
+                        //Exiting program
+                        active = 0;
                         break;
                     default:
                         break;
@@ -105,10 +109,24 @@ int main(int argc, char *argv[]) {
                 printf("Unknown command\n");
                 break;
         }
+        //We need to free path string
+        if (cmd.type == 2 && cmd.path != NULL) {
+            free(cmd.path);
+        }
+        //Then we free all arguments
+        for(i=0; i < arg_count; i++){
+            free(arguments[i]);
+            arguments[i] = NULL; //To mark as free
+        }
+        arg_count = 0;        
 
     }
+    for(i=0; i < local_var_size; i++){
+            free(local_var[i].name);
+            free(local_var[i].value);
+    }
+    free(local_var);
     
-    free(pwd);
     free(arguments);
 
     exit(EXIT_SUCCESS);
@@ -182,9 +200,14 @@ command lookPath(const char* path){
         while((entry = readdir(currentDir)) != NULL){
             if(strcmp(entry->d_name, path) == 0){
                 closedir(currentDir);
+                char* dirPathDup = strdup(dirPath);//When we free line dirPath loses it's reference
+                //So we need to clone 
                 free(line);
-                snprintf(fullpath, sizeof(fullpath), "%s/%s", dirPath, path);
-                return (command){.type = 2, .path = fullpath};
+                snprintf(fullpath, sizeof(fullpath), "%s/%s", dirPathDup, path);
+                //Path variable needs to be freed
+                //Note that we need to duplicate to return a pointer
+                //Since returning local gives memory problems (returning destroyed local data)
+                return (command){.type = 2, .path = strdup(fullpath)};
             }
         }
         closedir(currentDir);
@@ -193,8 +216,3 @@ command lookPath(const char* path){
 	//Verifying it found something
 	return (command){.type = -1};
 }
-
-void exitShell(int *status){
-    *status = 0;
-}
-
