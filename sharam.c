@@ -4,6 +4,8 @@
 #include <unistd.h> //For getcwd
 #include <linux/limits.h> //For PATH_MAX
 #include <errno.h> //For errno
+#include <err.h>//For warnings/errors
+#include <sys/wait.h> //For wait
 
 //To open folders
 #include <sys/types.h>
@@ -39,9 +41,11 @@ int main(int argc, char *argv[]) {
     int local_var_size = 0;
     int arg_capacity = 10; //Intial argument capacity will be 10, in case it isn't enough, it will realloc the double
     int arg_count = 0;
-    char** arguments = malloc(arg_capacity * sizeof(char*));
+    char** arguments = calloc(arg_capacity,sizeof(char*));
     int i,j;
     int active = 1;
+    int pid;
+	int status;
     command cmd;
 
     while(active){
@@ -104,6 +108,20 @@ int main(int argc, char *argv[]) {
                 break;
             case 2:
                 printf("Command found in PATH: %s\n", cmd.path);
+                switch(pid = fork()){
+                    case -1:
+                        warnx("Couldn't fork");
+                        break;
+                    case 0:
+                        execv(cmd.path,arguments);
+                        warnx("Could not execute command");
+                        break;
+                    default:
+                        while((pid = wait(&status)) != -1){
+                            continue; //Simply wait
+                        }
+                        break;
+                }
                 break;
             default:
                 printf("Unknown command\n");
@@ -181,6 +199,7 @@ command lookCurDir(const char* path){
         }
     }
 
+    closedir(dir);
     return (command){.type = -1};
 }
 
@@ -200,10 +219,8 @@ command lookPath(const char* path){
         while((entry = readdir(currentDir)) != NULL){
             if(strcmp(entry->d_name, path) == 0){
                 closedir(currentDir);
-                char* dirPathDup = strdup(dirPath);//When we free line dirPath loses it's reference
-                //So we need to clone 
+                snprintf(fullpath, sizeof(fullpath), "%s/%s", dirPath, path);
                 free(line);
-                snprintf(fullpath, sizeof(fullpath), "%s/%s", dirPathDup, path);
                 //Path variable needs to be freed
                 //Note that we need to duplicate to return a pointer
                 //Since returning local gives memory problems (returning destroyed local data)
