@@ -41,9 +41,10 @@ int main(int argc, char *argv[]) {
     int local_var_size = 0;
     char** arguments = malloc(sizeof(char*));
     int i,j;
+    int active = 1;
     command cmd;
 
-    while(1){
+    while(active){
         printf("\033[1;92m%s\033[0m", getcwd(pwd, sizeof(pwd)));
         printf("\033[1;36m sharam> \033[0m");
         if(fgets(line,MAXLINE,stdin) != NULL){
@@ -86,6 +87,13 @@ int main(int argc, char *argv[]) {
                 break;
             case 0:
                 printf("Builtin found\n");
+                switch(cmd.builtinIndex){
+                    case 0:
+                        exitShell(&active);
+                        break;
+                    default:
+                        break;
+                }
                 break;
             case 1:
                 printf("Command found in current directory\n");
@@ -123,6 +131,7 @@ command lookCommand(char* cmd_name){
 command lookBuiltin(char *cmd) {
 	int i;
 	char* builtins[] = {
+        "exit",
 		"cd",
 		"ifok",
 		"ifnot"
@@ -130,7 +139,7 @@ command lookBuiltin(char *cmd) {
 
 	for(i = 0; i < sizeof(builtins)/sizeof(char*); i++){
 		if (strcmp(cmd, builtins[i]) == 0)
-			return (command){.type = 0, .builtinIndex = i+1};
+			return (command){.type = 0, .builtinIndex = i};
 	}
 
 	return  (command){.type = -1};
@@ -183,5 +192,9 @@ command lookPath(const char* path){
 
 	//Verifying it found something
 	return (command){.type = -1};
+}
+
+void exitShell(int *status){
+    *status = 0;
 }
 
