@@ -7,6 +7,8 @@
 #include <err.h>//For warnings/errors
 #include <sys/wait.h> //For wait
 
+#include <signal.h>//For waiting background processes
+
 //To open folders
 #include <sys/types.h>
 #include <dirent.h>
@@ -19,6 +21,7 @@ typedef struct command{
     int type;
     char* path;
     int builtinIndex;
+    int background;
 } command;
 
 typedef struct localVariables{
@@ -30,23 +33,25 @@ command lookCommand(char*);
 command lookBuiltin(char *);
 command lookPath(const char*);
 command lookCurDir(const char*);
-
+void chilldHandler(int sig);
 
 int main(int argc, char *argv[]) {
     char line[MAXLINE];
     char pwd[PATH_MAX];
     char* token, *varToken;
     char* saveptr, *saveptr2;
-    localVariables* local_var = (localVariables*)malloc(sizeof(localVariables));
-    int local_var_size = 0;
+    int local_var_capacity = 5;
     int arg_capacity = 10; //Intial argument capacity will be 10, in case it isn't enough, it will realloc the double
-    int arg_count = 0;
+    int arg_count = 0; //Note that C doesn't have double initialization
+    int local_var_count = 0;
+    localVariables* local_var = (localVariables*)malloc(local_var_capacity * sizeof(localVariables));
     char** arguments = calloc(arg_capacity,sizeof(char*));
     int i,j;
     int active = 1;
     int pid;
 	int status;
     command cmd;
+    signal(SIGCHLD,chilldHandler);
 
     while(active){
         printf("\033[1;92m%s\033[0m", getcwd(pwd, sizeof(pwd)));
@@ -67,19 +72,23 @@ int main(int argc, char *argv[]) {
                 arguments[i] = strdup(token);
                 arg_count++;
                 //Then we seprate by equals symbols
-                for(j=0,varToken = strtok_r(token,"=",&saveptr2); varToken != NULL; varToken = strtok_r(NULL,"=",&saveptr2),j++){
-                    break;
-                    if(strcmp(varToken, arguments[i]) == 0){
-                        continue;
+                for(j=0,varToken = strtok_r(token,"=",&saveptr2); i == 0; varToken = strtok_r(NULL,"=",&saveptr2),j++){
+                    if(varToken == NULL || (strcmp(varToken, arguments[i]) == 0)){
+                        break;
                     }
                     else if(j){
                         //We are in the value
                         printf("Value: %s\n", varToken);
-                        local_var[local_var_size].value = varToken;
-                        local_var_size++;
+                        if(local_var_count >= local_var_capacity){
+                            local_var_capacity *= 2; //Duplicate capacity
+                            local_var = realloc(local_var, local_var_capacity * sizeof(char*));
+                        }
+                        //Duplicate varToken since we will loose reference once clearing arguments
+                        local_var[local_var_count].value = strdup(varToken); 
+                        local_var_count++;
                     }else{
                         printf("Var_name: %s\n", varToken);
-                        local_var[local_var_size].name = varToken;
+                        local_var[local_var_count].name = strdup(varToken);
                     }
                 }
             }
@@ -88,6 +97,15 @@ int main(int argc, char *argv[]) {
             printf("arg[%d]: %s\n", i, arguments[i]);
         }
         cmd = lookCommand(arguments[0]);
+        if(arg_count > 1 && strcmp(arguments[arg_count-1],"&") == 0){
+            cmd.background = 1;
+            //arg_count--;
+            free(arguments[arg_count-1]);
+            arguments[arg_count-1] = NULL; //To not pass it as argument
+        }
+        else
+            cmd.background = 0;
+
         switch(cmd.type){
             case -1:
                 printf("Command not found\n");
@@ -104,10 +122,7 @@ int main(int argc, char *argv[]) {
                 }
                 break;
             case 1:
-                printf("Command found in current directory\n");
-                break;
             case 2:
-                printf("Command found in PATH: %s\n", cmd.path);
                 switch(pid = fork()){
                     case -1:
                         warnx("Couldn't fork");
@@ -117,10 +132,15 @@ int main(int argc, char *argv[]) {
                         warnx("Could not execute command");
                         break;
                     default:
-                        while((pid = wait(&status)) != -1){
-                            continue; //Simply wait
+                        printf("Path: %s, Type:%d\n", cmd.path, cmd.type);
+                        if(!cmd.background){
+                            waitpid(pid, &status, 0);  // Wait specifically for the foreground process
+                            // while((pid = wait(&status)) != -1){
+                            //     continue; //Simply wait
+                            // }
                         }
                         break;
+                        
                 }
                 break;
             default:
@@ -128,7 +148,7 @@ int main(int argc, char *argv[]) {
                 break;
         }
         //We need to free path string
-        if (cmd.type == 2 && cmd.path != NULL) {
+        if (cmd.path != NULL) {
             free(cmd.path);
         }
         //Then we free all arguments
@@ -139,7 +159,7 @@ int main(int argc, char *argv[]) {
         arg_count = 0;        
 
     }
-    for(i=0; i < local_var_size; i++){
+    for(i=0; i < local_var_count; i++){
             free(local_var[i].name);
             free(local_var[i].value);
     }
@@ -186,6 +206,7 @@ command lookCurDir(const char* path){
     getcwd(pwd, sizeof(pwd));
     DIR* dir = opendir(pwd);
     struct dirent* entry;
+    char fullpath[PATH_MAX];
 
     if(dir == NULL){
         errno = 0; //Reset errno
@@ -195,7 +216,12 @@ command lookCurDir(const char* path){
     while((entry = readdir(dir)) != NULL){
         if(strcmp(entry->d_name, path) == 0){
             closedir(dir);
-            return (command){.type = 1};
+            int len = snprintf(fullpath, sizeof(fullpath), "%s/%s", pwd, path);
+            if (len >= sizeof(fullpath)) { //Path overflowed
+                return (command){.type = -1};
+            }
+
+            return (command){.type = 1, .path = strdup(fullpath)};
         }
     }
 
@@ -205,6 +231,8 @@ command lookCurDir(const char* path){
 
 command lookPath(const char* path){
 	char* env = getenv("PATH");
+    //Needs to be duplicated since strtok_r modifies the string
+    //And getenv returns a pointer to the environment variable itself
     char* line = strdup(env);
     char* dirPath, *saveptr;
     DIR* currentDir;
@@ -219,7 +247,10 @@ command lookPath(const char* path){
         while((entry = readdir(currentDir)) != NULL){
             if(strcmp(entry->d_name, path) == 0){
                 closedir(currentDir);
-                snprintf(fullpath, sizeof(fullpath), "%s/%s", dirPath, path);
+                int len = snprintf(fullpath, sizeof(fullpath), "%s/%s", dirPath, path);
+                if (len >= sizeof(fullpath)) { //Path overflowed
+                    return (command){.type = -1};
+                }
                 free(line);
                 //Path variable needs to be freed
                 //Note that we need to duplicate to return a pointer
@@ -230,6 +261,18 @@ command lookPath(const char* path){
         closedir(currentDir);
     }
 
+    free(line);
 	//Verifying it found something
 	return (command){.type = -1};
+}
+
+void chilldHandler(int sig){
+    int status;
+    pid_t pid;
+    
+    // Reap all terminated children
+    //Wait pid to no block the program
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        printf("Child %d terminated\n", pid);
+    }
 }
