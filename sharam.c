@@ -46,8 +46,9 @@ int main(int argc, char *argv[]) {
     int local_var_count = 0;
     localVariables* local_var = (localVariables*)malloc(local_var_capacity * sizeof(localVariables));
     char** arguments = calloc(arg_capacity,sizeof(char*));
-    int i,j;
+    int i,j,n;
     int active = 1;
+    int var_error = 0;
     int pid;
 	int status;
     command cmd;
@@ -69,8 +70,26 @@ int main(int argc, char *argv[]) {
                     arguments = realloc(arguments, arg_capacity * sizeof(char*));
                 }
                 printf("token: %s\n", token);
-                arguments[i] = strdup(token);
-                arg_count++;
+                if(token[0] == '$'){
+                    char* temp = token + 1;
+                    for(n=0; n < local_var_count; n++){
+                        if(strcmp(local_var[n].name,temp) == 0){
+                            //If not im returning same as local_var and that gives memory/free problems
+                            arguments[i] = strdup(local_var[n].value); 
+                            arg_count++;
+                            break;
+                        }
+                    }
+                    if(n == local_var_count){ //This means nothing was found
+                        printf("error: var %s does not exist\n", token+1);
+                        var_error = 1;
+                        break;
+                    }
+                }
+                else{
+                    arguments[i] = strdup(token);
+                    arg_count++;
+                }
                 //Then we seprate by equals symbols
                 for(j=0,varToken = strtok_r(token,"=",&saveptr2); i == 0; varToken = strtok_r(NULL,"=",&saveptr2),j++){
                     if(varToken == NULL || (strcmp(varToken, arguments[i]) == 0)){
@@ -96,67 +115,73 @@ int main(int argc, char *argv[]) {
         for(i=0; i < arg_count; i++){
             printf("arg[%d]: %s\n", i, arguments[i]);
         }
-        cmd = lookCommand(arguments[0]);
-        if(arg_count > 1 && strcmp(arguments[arg_count-1],"&") == 0){
-            cmd.background = 1;
-            //arg_count--;
-            free(arguments[arg_count-1]);
-            arguments[arg_count-1] = NULL; //To not pass it as argument
-        }
-        else
-            cmd.background = 0;
+        //This means no var error
+        if(!var_error){
+            cmd = lookCommand(arguments[0]);
+            if(arg_count > 1 && strcmp(arguments[arg_count-1],"&") == 0){
+                cmd.background = 1;
+                //arg_count--;
+                free(arguments[arg_count-1]);
+                arguments[arg_count-1] = NULL; //To not pass it as argument
+            }
+            else
+                cmd.background = 0;
 
-        switch(cmd.type){
-            case -1:
-                printf("Command not found\n");
-                break;
-            case 0:
-                printf("Builtin found\n");
-                switch(cmd.builtinIndex){
-                    case 0:
-                        //Exiting program
-                        active = 0;
-                        break;
-                    default:
-                        break;
-                }
-                break;
-            case 1:
-            case 2:
-                switch(pid = fork()){
-                    case -1:
-                        warnx("Couldn't fork");
-                        break;
-                    case 0:
-                        execv(cmd.path,arguments);
-                        warnx("Could not execute command");
-                        break;
-                    default:
-                        printf("Path: %s, Type:%d\n", cmd.path, cmd.type);
-                        if(!cmd.background){
-                            waitpid(pid, &status, 0);  // Wait specifically for the foreground process
-                            // while((pid = wait(&status)) != -1){
-                            //     continue; //Simply wait
-                            // }
-                        }
-                        break;
-                        
-                }
-                break;
-            default:
-                printf("Unknown command\n");
-                break;
+            switch(cmd.type){
+                case -1:
+                    printf("Command not found\n");
+                    break;
+                case 0:
+                    printf("Builtin found\n");
+                    switch(cmd.builtinIndex){
+                        case 0:
+                            //Exiting program
+                            active = 0;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                case 1:
+                case 2:
+                    switch(pid = fork()){
+                        case -1:
+                            warnx("Couldn't fork");
+                            break;
+                        case 0:
+                            execv(cmd.path,arguments);
+                            warnx("Could not execute command");
+                            break;
+                        default:
+                            printf("Path: %s, Type:%d\n", cmd.path, cmd.type);
+                            if(!cmd.background){
+                                waitpid(pid, &status, 0);  // Wait specifically for the foreground process
+                                // while((pid = wait(&status)) != -1){
+                                //     continue; //Simply wait
+                                // }
+                            }
+                            break;
+                            
+                    }
+                    break;
+                default:
+                    printf("Unknown command\n");
+                    break;
+            }
+
+            //We need to free path string
+            if (cmd.path != NULL) {
+                free(cmd.path);
+            }
         }
-        //We need to free path string
-        if (cmd.path != NULL) {
-            free(cmd.path);
-        }
+        
         //Then we free all arguments
         for(i=0; i < arg_count; i++){
             free(arguments[i]);
             arguments[i] = NULL; //To mark as free
         }
-        arg_count = 0;        
+        arg_count = 0;    
+        var_error = 0;    
 
     }
     for(i=0; i < local_var_count; i++){
@@ -272,6 +297,7 @@ void chilldHandler(int sig){
     
     // Reap all terminated children
     //Wait pid to no block the program
+    //The while is  in the case many children exit an once abut system only sends one signal
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
         printf("Child %d terminated\n", pid);
     }
