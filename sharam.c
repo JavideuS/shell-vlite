@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h> //For dup2
 #include <unistd.h> //For getcwd
 #include <linux/limits.h> //For PATH_MAX
 #include <errno.h> //For errno
@@ -29,6 +30,12 @@ typedef struct localVariables{
     char* value;
 } localVariables;
 
+typedef struct redirection{
+    char* inputFile;
+    char* outputFile;
+    int appendMode;
+} redirection;
+
 command lookCommand(char*);
 command lookBuiltin(char *);
 command lookPath(const char*);
@@ -42,10 +49,10 @@ int main(int argc, char *argv[]) {
     char* saveptr, *saveptr2;
     int local_var_capacity = 5;
     int arg_capacity = 10; //Intial argument capacity will be 10, in case it isn't enough, it will realloc the double
-    int arg_count = 0; //Note that C doesn't have double initialization
-    int local_var_count = 0;
+    int arg_count = 0, local_var_count = 0; //Note that C doesn't have double initialization
     localVariables* local_var = (localVariables*)malloc(local_var_capacity * sizeof(localVariables));
     char** arguments = calloc(arg_capacity,sizeof(char*));
+    redirection redir = {NULL,NULL,0};
     int i,j,n;
     int active = 1;
     int var_error = 0;
@@ -65,7 +72,7 @@ int main(int argc, char *argv[]) {
 }
             //First we separate by lines
             for(i=0,token = strtok_r(line, " ",&saveptr);token != NULL; token = strtok_r(NULL, " ",&saveptr),i++){
-                if(i >= arg_capacity){
+                if(arg_count >= arg_capacity){
                     arg_capacity *= 2; //Duplicate capacity
                     arguments = realloc(arguments, arg_capacity * sizeof(char*));
                 }
@@ -75,7 +82,7 @@ int main(int argc, char *argv[]) {
                     for(n=0; n < local_var_count; n++){
                         if(strcmp(local_var[n].name,temp) == 0){
                             //If not im returning same as local_var and that gives memory/free problems
-                            arguments[i] = strdup(local_var[n].value); 
+                            arguments[arg_count] = strdup(local_var[n].value); 
                             arg_count++;
                             break;
                         }
@@ -86,8 +93,33 @@ int main(int argc, char *argv[]) {
                         break;
                     }
                 }
+                else if(strcmp(token,">") == 0){
+                    printf("%s\n",token);
+                    //printf("%s\n", token+2); Doing token+2 dont work unless there are no more argumentes after
+                    //Which is not guaranted
+                    token = strtok_r(NULL, " ",&saveptr);
+                    redir.outputFile = strdup(token);
+                    redir.appendMode = 0;
+                    i++;
+                    printf("%s\n",token);
+                }
+                else if(strcmp(token,">>") == 0){
+                    printf("%s\n",token);
+                    token = strtok_r(NULL, " ",&saveptr);
+                    redir.outputFile = strdup(token);
+                    redir.appendMode = 1;
+                    i++;
+                    printf("%s\n",token);
+                }
+                else if(strcmp(token,"<") == 0 ){
+                    printf("%s\n",token);
+                    token = strtok_r(NULL, " ",&saveptr);
+                    redir.inputFile = strdup(token);
+                    i++;
+                    printf("%s\n",token);
+                }
                 else{
-                    arguments[i] = strdup(token);
+                    arguments[arg_count] = strdup(token);
                     arg_count++;
                 }
                 //Then we seprate by equals symbols
@@ -149,6 +181,26 @@ int main(int argc, char *argv[]) {
                             warnx("Couldn't fork");
                             break;
                         case 0:
+                            //Input redirection
+                            if(redir.inputFile != NULL){
+                                int fd = open(redir.inputFile, O_RDONLY);
+                                if(fd < 0){
+                                    warnx("Could not open input file %s", redir.inputFile);
+                                }
+                                dup2(fd,STDIN_FILENO);
+                                close(fd);
+                            }
+                            //Output redirection
+                            if(redir.outputFile != NULL){
+                                int flags = O_WRONLY | O_CREAT;
+                                flags |= (redir.appendMode ? O_APPEND : O_TRUNC);
+                                int fd = open(redir.outputFile, flags,0644);
+                                if(fd < 0){
+                                    warnx("Could not open output file %s", redir.outputFile);
+                                }
+                                dup2(fd,STDOUT_FILENO);
+                                close(fd);
+                            }
                             execv(cmd.path,arguments);
                             warnx("Could not execute command");
                             break;
@@ -167,6 +219,15 @@ int main(int argc, char *argv[]) {
                 default:
                     printf("Unknown command\n");
                     break;
+            }
+            //Freeing and resetting to null redirecitons (in parent process)
+            if (redir.inputFile != NULL) {
+                free(redir.inputFile);
+                redir.inputFile = NULL;
+            }
+            if (redir.outputFile != NULL) {
+                free(redir.outputFile);
+                redir.outputFile = NULL;
             }
 
             //We need to free path string
