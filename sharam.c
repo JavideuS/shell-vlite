@@ -218,6 +218,7 @@ int main(int argc, char *argv[])
                                     else
                                     {
                                         printf("error: missing file for redirection\n");
+                                        var_error = 1;
                                         break;
                                     }
                                 }
@@ -270,6 +271,7 @@ int main(int argc, char *argv[])
                                     else
                                     {
                                         printf("error: missing file for redirection\n");
+                                        var_error = 1;
                                         break;
                                     }
                                 }
@@ -381,6 +383,22 @@ int main(int argc, char *argv[])
                 case 0:
                     // Exiting program
                     active = 0;
+                    break;
+                case 1:
+                    // Changing directory
+                    if (arg_count == 2)
+                    {
+                        if (chdir(arguments[1]) != 0)
+                        {
+                            warnx("Could not change directory to %s", arguments[1]);
+                            //reset errno
+                            errno = 0;
+                        }
+                    }
+                    else
+                    {
+                        printf("error: missing argument for cd\n");
+                    }
                     break;
                 default:
                     break;
