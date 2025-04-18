@@ -81,12 +81,17 @@ int main(int argc, char *argv[])
                 line[len - 1] = '\0';
             }
             // First we separate by lines
-            for (i = 0, token = strtok_r(line, " ", &saveptr); token != NULL; token = strtok_r(NULL, " ", &saveptr), i++)
+            for (i = 0, token = strtok_r(line, "  \t", &saveptr); token != NULL; token = strtok_r(NULL, "  \t", &saveptr), i++)
             {
                 if (arg_count >= arg_capacity)
                 {
                     arg_capacity *= 2; // Duplicate capacity
                     arguments = realloc(arguments, arg_capacity * sizeof(char *));
+                    //The extra memory from realloc is garbage
+                    //So we need to manually set it to Null
+                    for(n = arg_count; n < arg_capacity; n++){
+                        arguments[n] = NULL;
+                    }
                 }
                 printf("token: %s\n", token);
                 if (token[0] == '$')
@@ -353,6 +358,13 @@ int main(int argc, char *argv[])
                 }
             }
         }
+        else
+        {
+            // fgets returned NULL
+            // EOF detected (end of script file)
+            break;  // Exit the loop and terminate the shell
+            //It will then free all resources
+        }
         for (i = 0; i < arg_count; i++)
         {
             printf("arg[%d]: %s\n", i, arguments[i]);
@@ -616,119 +628,8 @@ void chilldHandler(int sig)
     // The while is  in the case many children exit an once abut system only sends one signal
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
     {
-        printf("Child %d terminated\n", pid);
+        //printf("Child %d terminated\n", pid);
+        //Should be printed after executing a command (like shell)
+        continue;
     }
 }
-
-// redirection redirectionsParser(redirection *redir, char *argument)
-// {
-//     size_t i;
-//     size_t len = strlen(argument);
-//     for (i = 0; i < len; i++)
-//     {
-//         if (argument[i] == '>')
-//         {
-//             if (i + 1 < len && argument[i + 1] == '>')
-//             {
-//                 // Just >>
-//                 if (i == 0 && i + 2 >= len)
-//                 {
-//                     // Tokenize then set next token as argument
-//                     // Would need to check following token doesnt have more redirections
-//                     redir->outputFile = strdup(argument);
-//                     redir->appendMode = 1;
-//                     return *redir;
-//                 }
-//                 else
-//                 {
-//                     // this means there were arguments before
-//                     if (i != 0)
-//                     {
-//                         // prev was simple argument
-//                         char *prev_arg;
-//                         strncpy(prev_arg, argument, i);
-//                         prev_arg[i] = '\0';
-//                     }
-//                     // This means there are args after symbol
-//                     if (i + 2 < len)
-//                     {
-//                         // Whitespace after >>
-//                         // All was parse as single token so need to splice it
-//                         redir->outputFile = strdup(argument) + 2;
-//                         redir->appendMode = 1;
-//                     }
-//                     return *redir;
-//                 }
-//             }
-//             else if (i + 1 < len && argument[i + 1] == '&')
-//             {
-//             }
-//             else
-//             {
-//                 // Just >
-//                 if (i == 0 && i + 1 >= len)
-//                 {
-//                     // Tokenize then set next token as argument
-//                     // Would need to check following token doesnt have more redirections
-//                     redir->outputFile = strdup(argument);
-//                     redir->appendMode = 0;
-//                     return *redir;
-//                 }
-//                 else
-//                 {
-//                     // this means there were arguments before
-//                     if (i != 0)
-//                     {
-//                         // prev was simple argument
-//                         char *prev_arg;
-//                         strncpy(prev_arg, argument, i);
-//                         prev_arg[i] = '\0';
-//                     }
-//                     // This means there are args after symbol
-//                     if (i + 2 < len)
-//                     {
-//                         // Whitespace after >>
-//                         // All was parse as single token so need to splice it
-//                         redir->outputFile = strdup(argument) + 1;
-//                         redir->appendMode = 0;
-//                     }
-//                     return *redir;
-//                 }
-//             }
-//         }
-//         else if (argument[i] == '<')
-//         {
-//             // Just >>
-//             if (i == 0 && i + 1 >= len)
-//             {
-//                 // Tokenize then set next token as argument
-//                 // Would need to check following token doesnt have more redirections
-//                 redir->outputFile = strdup(argument);
-//                 redir->appendMode = 1;
-//                 return *redir;
-//             }
-//             else
-//             {
-//                 // this means there were arguments before
-//                 if (i != 0)
-//                 {
-//                     // prev was simple argument
-//                     char *prev_arg;
-//                     strncpy(prev_arg, argument, i);
-//                     prev_arg[i] = '\0';
-//                 }
-//                 // This means there are args after symbol
-//                 if (i + 2 < len)
-//                 {
-//                     // Whitespace after >>
-//                     // All was parse as single token so need to splice it
-//                     redir->outputFile = strdup(argument) + 2;
-//                     redir->appendMode = 1;
-//                 }
-//                 return *redir;
-//             }
-//         }
-//     }
-//     // This means there are no redirections
-//     return *redir;
-// }
