@@ -41,29 +41,39 @@ typedef struct redirection
     int appendMode;
 } redirection;
 
+typedef struct shellState{
+    char** arguments;
+    int arg_capacity;
+    int arg_count;
+    localVariables *local_var;
+    int local_var_capacity;
+    int local_var_count;
+    int var_error;
+} shellState;
+
 command lookCommand(char *);
 command lookBuiltin(char *);
 command lookPath(const char *);
 command lookCurDir(const char *);
+void lineParser(char *,shellState *, redirection *);
 
 int main(int argc, char *argv[])
 {
     char line[MAXLINE];
     char pwd[PATH_MAX];
-    char *token, *varToken;
-    char *saveptr, *saveptr2;
-    int local_var_capacity = 5;
-    int arg_capacity = 10;                  // Intial argument capacity will be 10, in case it isn't enough, it will realloc the double
-    int arg_count = 0, local_var_count = 0; // Note that C doesn't have double initialization
-    localVariables *local_var = (localVariables *)malloc(local_var_capacity * sizeof(localVariables));
-    char **arguments = calloc(arg_capacity, sizeof(char *));
+    shellState shell;
+    shell.local_var_capacity = 5;
+    shell.arg_capacity = 10;                  // Intial argument capacity will be 10, in case it isn't enough, it will realloc the double
+    shell.arg_count = 0; 
+    shell.local_var_count = 0; 
+    shell.local_var = (localVariables *)malloc(shell.local_var_capacity * sizeof(localVariables));
+    shell.arguments = calloc(shell.arg_capacity, sizeof(char *));
     redirection redir = {NULL, NULL, 0};
-    int i, j, n;
-    int var_error = 0;
+    int i;
+    shell.var_error = 0;
     int pid, pidwait;
     int status;
     command cmd;
-    char *redirToken, *redirect_pos;
 
     //The program ends when EOF (ctrol+D)
     while (69)
@@ -72,311 +82,29 @@ int main(int argc, char *argv[])
         printf("\033[1;36m sharam> \033[0m");
         if (fgets(line, MAXLINE, stdin) != NULL)
         {
-            // Remove trailing newline
-            size_t len = strlen(line);
-            if (len > 0 && line[len - 1] == '\n')
-            {
-                line[len - 1] = '\0';
-            }
-            // First we separate by lines
-            for (i = 0, token = strtok_r(line, "  \t", &saveptr); token != NULL; token = strtok_r(NULL, "  \t", &saveptr), i++)
-            {
-                if (arg_count >= arg_capacity)
-                {
-                    arg_capacity *= 2; // Duplicate capacity
-                    arguments = realloc(arguments, arg_capacity * sizeof(char *));
-                    //The extra memory from realloc is garbage
-                    //So we need to manually set it to Null
-                    for(n = arg_count; n < arg_capacity; n++){
-                        arguments[n] = NULL;
-                    }
-                }
-                printf("token: %s\n", token);
-                if (token[0] == '$')
-                {
-                    char *temp = token + 1;
-                    for (n = 0; n < local_var_count; n++)
-                    {
-                        if (strcmp(local_var[n].name, temp) == 0)
-                        {
-                            // If not im returning same as local_var and that gives memory/free problems
-                            arguments[arg_count++] = strdup(local_var[n].value);
-                            break;
-                        }
-                    }
-                    if (n == local_var_count)
-                    { // This means nothing was found
-                        printf("error: var %s does not exist\n", token + 1);
-                        var_error = 1;
-                        break;
-                    }
-                    //Else it creates new vars and doesnt free them
-                    continue;
-                }
-                // Handling redirection operators
-                else
-                {
-                    redirect_pos = NULL;
-                    redirToken = NULL;
-
-                    if ((redirect_pos = strpbrk(token, "><")) != NULL)
-                    {
-
-                        int index = redirect_pos - token;
-                        if (index > 0)
-                        {
-                            // There's text before the <
-                            char saved = *redirect_pos;
-                            *redirect_pos = '\0';
-                            arguments[arg_count++] = strdup(token);
-                            *redirect_pos = saved;
-                        }
-
-                        if (redirect_pos[0] == '<')
-                        {
-                            if (redirect_pos[1] == '\0')
-                            {
-                                // Format: "<" - need next token as filename
-                                token = strtok_r(NULL, " ", &saveptr);
-                                i++;
-                                if (token != NULL)
-                                {
-                                    if(redir.outputFile != NULL){
-                                        free(redir.outputFile);
-                                    }
-
-                                    if ((redirToken = strpbrk(redirect_pos+1, "><")) != NULL)
-                                    {
-                                        char saved = *redirToken;
-                                        *redirToken = '\0';
-                                        redir.inputFile = strdup(redirect_pos + 1);
-                                        *redirToken = saved;
-
-                                        saveptr = redirToken;
-                                    }
-                                    else{
-                                        //Normal case
-                                        redir.inputFile = strdup(token);
-                                    }
-                                }
-                                else
-                                {
-                                    printf("error: missing file for redirection\n");
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                // Format: "<file" - filename is in this token
-                                // Verifying there's not multiple single chaining redirections in one string
-                                // In that case it would prioritize last redirection (like in bash)
-                                // Although it wont create files for previous redirections (they are simply ignored)
-                                //Different behavior than bash
-                                if(redir.outputFile != NULL){
-                                    free(redir.outputFile);
-                                }
-
-                                if ((redirToken = strpbrk(redirect_pos+1, "><")) != NULL)
-                                {
-                                    char saved = *redirToken;
-                                    *redirToken = '\0';
-                                    redir.inputFile = strdup(redirect_pos + 1);
-                                    *redirToken = saved;
-
-                                    saveptr = redirToken;
-                                }
-                                else{
-                                    redir.inputFile = strdup(redirect_pos + 1);
-                                }
-                            }
-                        }
-                        else
-                        {
-                            if (redirect_pos[1] == '>'){
-                                redir.appendMode = 1;
-                                if (redirect_pos[2] == '\0'){
-                                    // Format: "<" - need next token as filename
-                                    token = strtok_r(NULL, " ", &saveptr);
-                                    i++;
-                                    if (token != NULL)
-                                    {
-                                        if(redir.outputFile != NULL){
-                                            free(redir.outputFile);
-                                        }
-
-                                        if ((redirToken = strpbrk(redirect_pos + 1, "><")) != NULL)
-                                        {
-                                            char saved = *redirToken;
-                                            *redirToken = '\0';
-                                            redir.outputFile = strdup(redirect_pos + 1);
-                                            *redirToken = saved;
-
-                                            saveptr = redirToken;
-                                        }
-                                        else{
-                                            //Normal case
-                                            redir.outputFile = strdup(token);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        printf("error: missing file for redirection\n");
-                                        var_error = 1;
-                                        break;
-                                    }
-                                }
-                                else
-                                {
-                                    if(redir.outputFile != NULL){
-                                        free(redir.outputFile);
-                                    }
-
-                                    if ((redirToken = strpbrk(redirect_pos+1, "><")) != NULL)
-                                    {
-                                        char saved = *redirToken;
-                                        *redirToken = '\0';
-                                        redir.outputFile = strdup(redirect_pos + 1);
-                                        *redirToken = saved;
-
-                                        saveptr = redirToken;
-                                    }
-                                    else{
-                                        redir.outputFile = strdup(redirect_pos + 1);
-                                    }
-                                }
-                                
-                            }
-                            else
-                            {
-                                if (redirect_pos[1] == '\0'){
-                                    // Format: "<" - need next token as filename
-                                    token = strtok_r(NULL, " ", &saveptr);
-                                    i++;
-                                    if (token != NULL)
-                                    {
-                                        if(redir.outputFile != NULL){
-                                            free(redir.outputFile);
-                                        }
-
-                                        if ((redirToken = strpbrk(redirect_pos+1, "><")) != NULL)
-                                        {
-                                            char saved = *redirToken;
-                                            *redirToken = '\0';
-                                            redir.outputFile = strdup(redirect_pos + 1);
-                                            *redirToken = saved;
-
-                                            saveptr = redirToken;
-                                        }
-                                        else{
-                                            redir.outputFile = strdup(token);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        printf("error: missing file for redirection\n");
-                                        var_error = 1;
-                                        break;
-                                    }
-                                }
-                                else
-                                {
-                                    // Format: "<file" - filename is in this token
-                                    // Verifying there's not multiple single chaining redirections in one string
-                                    // In that case it would priotize last redirection (like in bash)
-                                    // Although it wont create files for previous redirections (they are simply ignored)
-                                    if(redir.outputFile != NULL){
-                                        free(redir.outputFile);
-                                    }
-
-                                    if ((redirToken = strpbrk(redirect_pos+1, "><")) != NULL)
-                                    {
-                                        char saved = *redirToken;
-                                        *redirToken = '\0';
-                                        redir.outputFile = strdup(redirect_pos + 1);
-                                        *redirToken = saved;
-
-                                        saveptr = redirToken;
-                                    }
-                                    else{
-                                        redir.outputFile = strdup(redirect_pos + 1);
-                                    }
-                                }
-                            }
-                        }
-
-                    }
-                    else
-                    {
-                        arguments[arg_count++] = strdup(token);
-                    }
-                }
-
-                // Keep your existing for loop for handling variable assignments
-                for (j = 0, varToken = strtok_r(token, "=", &saveptr2); i == 0; varToken = strtok_r(NULL, "=", &saveptr2), j++)
-                {
-                    if (varToken == NULL || (strcmp(varToken, arguments[i]) == 0))
-                    {
-                        break;
-                    }
-                    else if (j)
-                    {
-                        // We are in the value
-                        printf("Value: %s\n", varToken);
-                        if (local_var_count >= local_var_capacity)
-                        {
-                            local_var_capacity *= 2; // Duplicate capacity
-                            local_var = realloc(local_var, local_var_capacity * sizeof(char *));
-                        }
-                        // Duplicate varToken since we will loose reference once clearing arguments
-                        if(n == local_var_count){
-                            printf("Local_var_count: %d\n", local_var_count);
-                            local_var[local_var_count++].value = strdup(varToken);
-                        }
-                        else{
-                            printf("n: %d\n", n);
-                            free(local_var[n].value);
-                            local_var[n].value = strdup(varToken);
-                        }
-                    }
-                    else
-                    {
-                        printf("Var_name: %s\n", varToken);
-                        for(n = 0; n < local_var_count; n++)
-                        {
-                            if (strcmp(local_var[n].name, varToken) == 0)
-                            {
-                                //If not im storing it twice, but the later will never be used
-                                break;
-                            }
-                        }
-                        if(n == local_var_count){
-                            local_var[local_var_count].name = strdup(varToken);
-                        }
-                    }
-                }
-            }
+            //Passing them by value so to modify the context
+            lineParser(line, &shell, &redir);
         }
         else
         {
-            // fgets returned NULL
             // EOF detected (end of script file)
             break;  // Exit the loop and terminate the shell
             //It will then free all resources
         }
-        for (i = 0; i < arg_count; i++)
+        for (i = 0; i < shell.arg_count; i++)
         {
-            printf("arg[%d]: %s\n", i, arguments[i]);
+            printf("arg[%d]: %s\n", i, shell.arguments[i]);
         }
-        // This means no var error
-        if (!var_error)
+        // This means no error during parse and hence is theoretically a valid command
+        if (!shell.var_error)
         {
-            cmd = lookCommand(arguments[0]);
-            if (arg_count > 1 && strcmp(arguments[arg_count - 1], "&") == 0)
+            cmd = lookCommand(shell.arguments[0]);
+            if (shell.arg_count > 1 && strcmp(shell.arguments[shell.arg_count - 1], "&") == 0)
             {
                 cmd.background = 1;
                 // arg_count--;
-                free(arguments[arg_count - 1]);
-                arguments[arg_count - 1] = NULL; // To not pass it as argument
+                free(shell.arguments[shell.arg_count - 1]);
+                shell.arguments[shell.arg_count - 1] = NULL; // To not pass it as argument
             }
             else
                 cmd.background = 0;
@@ -392,11 +120,11 @@ int main(int argc, char *argv[])
                 {
                 case 0:
                     // Changing directory
-                    if (arg_count == 2)
+                    if (shell.arg_count == 2)
                     {
-                        if (chdir(arguments[1]) != 0)
+                        if (chdir(shell.arguments[1]) != 0)
                         {
-                            warnx("Could not change directory to %s", arguments[1]);
+                            warnx("Could not change directory to %s", shell.arguments[1]);
                             //reset errno
                             errno = 0;
                         }
@@ -442,14 +170,13 @@ int main(int argc, char *argv[])
                         dup2(fd, STDOUT_FILENO);
                         close(fd);
                     }
-                    execv(cmd.path, arguments);
+                    execv(cmd.path, shell.arguments);
                     warnx("Could not execute command");
                     break;
                 default:
                     printf("Path: %s, Type:%d\n", cmd.path, cmd.type);
                     if (!cmd.background)
                     {
-                        //waitpid(pid, &status, 0); // Wait specifically for the foreground process
                         while((pidwait = wait(&status)) != -1){
                             if(pidwait == pid){
                                 break;
@@ -485,22 +212,22 @@ int main(int argc, char *argv[])
         }
 
         // Then we free all arguments
-        for (i = 0; i < arg_count; i++)
+        for (i = 0; i < shell.arg_count; i++)
         {
-            free(arguments[i]);
-            arguments[i] = NULL; // To mark as free
+            free(shell.arguments[i]);
+            shell.arguments[i] = NULL; // To mark as free
         }
-        arg_count = 0;
-        var_error = 0;
+        shell.arg_count = 0;
+        shell.var_error = 0;
     }
-    for (i = 0; i < local_var_count; i++)
+    for (i = 0; i < shell.local_var_count; i++)
     {
-        free(local_var[i].name);
-        free(local_var[i].value);
+        free(shell.local_var[i].name);
+        free(shell.local_var[i].value);
     }
-    free(local_var);
+    free(shell.local_var);
 
-    free(arguments);
+    free(shell.arguments);
 
     exit(EXIT_SUCCESS);
 }
@@ -613,4 +340,313 @@ command lookPath(const char *path)
     free(line);
     // Verifying it found something
     return (command){.type = -1};
+}
+
+void lineParser(char* line, shellState *shell, redirection *redir ){
+    char *token, *varToken;
+    char *saveptr, *saveptr2;
+    int i, j, n;
+    char saved;
+
+    // Remove trailing newline
+    char *redirToken, *redirect_pos;
+    size_t len = strlen(line);
+    if (len > 0 && line[len - 1] == '\n')
+    {
+        line[len - 1] = '\0';
+    }
+    // First we separate by lines
+    for (i = 0, token = strtok_r(line, "  \t", &saveptr); token != NULL; token = strtok_r(NULL, "  \t", &saveptr), i++)
+    {
+        if (shell->arg_count >= shell->arg_capacity)
+        {
+            shell->arg_capacity *= 2; // Duplicate capacity
+            shell->arguments = realloc(shell->arguments, shell->arg_capacity * sizeof(char *));
+            // The extra memory from realloc is garbage
+            // So we need to manually set it to Null
+            for (n = shell->arg_count; n < shell->arg_capacity; n++)
+            {
+                shell->arguments[n] = NULL;
+            }
+        }
+        printf("token: %s\n", token);
+        if (token[0] == '$')
+        {
+            char *temp = token + 1;
+            for (n = 0; n < shell->local_var_count; n++)
+            {
+                if (strcmp(shell->local_var[n].name, temp) == 0)
+                {
+                    // If not im returning same as local_var and that gives memory/free problems
+                    shell->arguments[shell->arg_count++] = strdup(shell->local_var[n].value);
+                    break;
+                }
+            }
+            if (n == shell->local_var_count)
+            { // This means nothing was found
+                printf("error: var %s does not exist\n", token + 1);
+                shell->var_error = 1;
+                break;
+            }
+            // Else it creates new vars and doesnt free them
+            continue;
+        }
+        // Handling redirection operators
+        else
+        {
+            redirect_pos = NULL;
+            redirToken = NULL;
+
+            if ((redirect_pos = strpbrk(token, "><")) != NULL)
+            {
+
+                int index = redirect_pos - token;
+                if (index > 0)
+                {
+                    // There's text before the <
+                    saved = *redirect_pos;
+                    *redirect_pos = '\0';
+                    shell->arguments[shell->arg_count++] = strdup(token);
+                    *redirect_pos = saved;
+                }
+
+                if (redirect_pos[0] == '<')
+                {
+                    if (redirect_pos[1] == '\0')
+                    {
+                        // Format: "<" - need next token as filename
+                        token = strtok_r(NULL, " ", &saveptr);
+                        i++;
+                        if (token != NULL)
+                        {
+                            if (redir->outputFile != NULL)
+                            {
+                                free(redir->outputFile);
+                            }
+
+                            if ((redirToken = strpbrk(redirect_pos + 1, "><")) != NULL)
+                            {
+                                saved = *redirToken;
+                                *redirToken = '\0';
+                                redir->inputFile = strdup(redirect_pos + 1);
+                                *redirToken = saved;
+
+                                saveptr = redirToken;
+                            }
+                            else
+                            {
+                                // Normal case
+                                redir->inputFile = strdup(token);
+                            }
+                        }
+                        else
+                        {
+                            printf("error: missing file for redirection\n");
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        // Format: "<file" - filename is in this token
+                        // Verifying there's not multiple single chaining redirections in one string
+                        // In that case it would prioritize last redirection (like in bash)
+                        // Although it wont create files for previous redirections (they are simply ignored)
+                        // Different behavior than bash
+                        if (redir->outputFile != NULL)
+                        {
+                            free(redir->outputFile);
+                        }
+
+                        if ((redirToken = strpbrk(redirect_pos + 1, "><")) != NULL)
+                        {
+                            saved = *redirToken;
+                            *redirToken = '\0';
+                            redir->inputFile = strdup(redirect_pos + 1);
+                            *redirToken = saved;
+
+                            saveptr = redirToken;
+                        }
+                        else
+                        {
+                            redir->inputFile = strdup(redirect_pos + 1);
+                        }
+                    }
+                }
+                else
+                {
+                    if (redirect_pos[1] == '>')
+                    {
+                        redir->appendMode = 1;
+                        if (redirect_pos[2] == '\0')
+                        {
+                            // Format: "<" - need next token as filename
+                            token = strtok_r(NULL, " ", &saveptr);
+                            i++;
+                            if (token != NULL)
+                            {
+                                if (redir->outputFile != NULL)
+                                {
+                                    free(redir->outputFile);
+                                }
+
+                                if ((redirToken = strpbrk(redirect_pos + 1, "><")) != NULL)
+                                {
+                                    saved = *redirToken;
+                                    *redirToken = '\0';
+                                    redir->outputFile = strdup(redirect_pos + 1);
+                                    *redirToken = saved;
+
+                                    saveptr = redirToken;
+                                }
+                                else
+                                {
+                                    // Normal case
+                                    redir->outputFile = strdup(token);
+                                }
+                            }
+                            else
+                            {
+                                printf("error: missing file for redirection\n");
+                                shell->var_error = 1;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            if (redir->outputFile != NULL)
+                            {
+                                free(redir->outputFile);
+                            }
+
+                            if ((redirToken = strpbrk(redirect_pos + 1, "><")) != NULL)
+                            {
+                                saved = *redirToken;
+                                *redirToken = '\0';
+                                redir->outputFile = strdup(redirect_pos + 1);
+                                *redirToken = saved;
+
+                                saveptr = redirToken;
+                            }
+                            else
+                            {
+                                redir->outputFile = strdup(redirect_pos + 1);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (redirect_pos[1] == '\0')
+                        {
+                            // Format: "<" - need next token as filename
+                            token = strtok_r(NULL, " ", &saveptr);
+                            i++;
+                            if (token != NULL)
+                            {
+                                if (redir->outputFile != NULL)
+                                {
+                                    free(redir->outputFile);
+                                }
+
+                                if ((redirToken = strpbrk(redirect_pos + 1, "><")) != NULL)
+                                {
+                                    saved = *redirToken;
+                                    *redirToken = '\0';
+                                    redir->outputFile = strdup(redirect_pos + 1);
+                                    *redirToken = saved;
+
+                                    saveptr = redirToken;
+                                }
+                                else
+                                {
+                                    redir->outputFile = strdup(token);
+                                }
+                            }
+                            else
+                            {
+                                printf("error: missing file for redirection\n");
+                                shell->var_error = 1;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            // Format: "<file" - filename is in this token
+                            // Verifying there's not multiple single chaining redirections in one string
+                            // In that case it would priotize last redirection (like in bash)
+                            // Although it wont create files for previous redirections (they are simply ignored)
+                            if (redir->outputFile != NULL)
+                            {
+                                free(redir->outputFile);
+                            }
+
+                            if ((redirToken = strpbrk(redirect_pos + 1, "><")) != NULL)
+                            {
+                                saved = *redirToken;
+                                *redirToken = '\0';
+                                redir->outputFile = strdup(redirect_pos + 1);
+                                *redirToken = saved;
+
+                                saveptr = redirToken;
+                            }
+                            else
+                            {
+                                redir->outputFile = strdup(redirect_pos + 1);
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                shell->arguments[shell->arg_count++] = strdup(token);
+            }
+        }
+
+        // Keep your existing for loop for handling variable assignments
+        for (j = 0, varToken = strtok_r(token, "=", &saveptr2); i == 0; varToken = strtok_r(NULL, "=", &saveptr2), j++)
+        {
+            if (varToken == NULL || (strcmp(varToken, shell->arguments[i]) == 0))
+            {
+                break;
+            }
+            else if (j)
+            {
+                // We are in the value
+                printf("Value: %s\n", varToken);
+                if (shell->local_var_count >= shell->local_var_capacity)
+                {
+                    shell->local_var_capacity *= 2; // Duplicate capacity
+                    shell->local_var = realloc(shell->local_var, shell->local_var_capacity * sizeof(char *));
+                }
+                // Duplicate varToken since we will loose reference once clearing arguments
+                if (n == shell->local_var_count)
+                {
+                    printf("Local_var_count: %d\n", shell->local_var_count);
+                    shell->local_var[shell->local_var_count++].value = strdup(varToken);
+                }
+                else
+                {
+                    printf("n: %d\n", n);
+                    free(shell->local_var[n].value);
+                    shell->local_var[n].value = strdup(varToken);
+                }
+            }
+            else
+            {
+                printf("Var_name: %s\n", varToken);
+                for (n = 0; n < shell->local_var_count; n++)
+                {
+                    if (strcmp(shell->local_var[n].name, varToken) == 0)
+                    {
+                        // If not im storing it twice, but the later will never be used
+                        break;
+                    }
+                }
+                if (n == shell->local_var_count)
+                {
+                    shell->local_var[shell->local_var_count].name = strdup(varToken);
+                }
+            }
+        }
+    }
 }
