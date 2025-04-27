@@ -60,7 +60,6 @@ int main(int argc, char *argv[])
     char **arguments = calloc(arg_capacity, sizeof(char *));
     redirection redir = {NULL, NULL, 0};
     int i, j, n;
-    int active = 1;
     int var_error = 0;
     int pid;
     int status;
@@ -68,7 +67,8 @@ int main(int argc, char *argv[])
     char *second_redir;
     signal(SIGCHLD, chilldHandler);
 
-    while (active)
+    //The program ends when EOF (ctrol+D)
+    while (69)
     {
         printf("\033[1;92m%s\033[0m", getcwd(pwd, sizeof(pwd)));
         printf("\033[1;36m sharam> \033[0m");
@@ -393,10 +393,6 @@ int main(int argc, char *argv[])
                 switch (cmd.builtinIndex)
                 {
                 case 0:
-                    // Exiting program
-                    active = 0;
-                    break;
-                case 1:
                     // Changing directory
                     if (arg_count == 2)
                     {
@@ -528,7 +524,6 @@ command lookBuiltin(char *cmd)
 {
     int i;
     char *builtins[] = {
-        "exit",
         "cd",
         "ifok",
         "ifnot"};
