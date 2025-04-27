@@ -45,7 +45,6 @@ command lookCommand(char *);
 command lookBuiltin(char *);
 command lookPath(const char *);
 command lookCurDir(const char *);
-void chilldHandler(int sig);
 
 int main(int argc, char *argv[])
 {
@@ -61,11 +60,10 @@ int main(int argc, char *argv[])
     redirection redir = {NULL, NULL, 0};
     int i, j, n;
     int var_error = 0;
-    int pid;
+    int pid, pidwait;
     int status;
     command cmd;
-    char *second_redir;
-    signal(SIGCHLD, chilldHandler);
+    char *redirToken, *redirect_pos;
 
     //The program ends when EOF (ctrol+D)
     while (69)
@@ -118,8 +116,8 @@ int main(int argc, char *argv[])
                 // Handling redirection operators
                 else
                 {
-                    char *redirect_pos = NULL;
-                    second_redir = NULL;
+                    redirect_pos = NULL;
+                    redirToken = NULL;
 
                     if ((redirect_pos = strpbrk(token, "><")) != NULL)
                     {
@@ -147,14 +145,14 @@ int main(int argc, char *argv[])
                                         free(redir.outputFile);
                                     }
 
-                                    if ((second_redir = strpbrk(redirect_pos+1, "><")) != NULL)
+                                    if ((redirToken = strpbrk(redirect_pos+1, "><")) != NULL)
                                     {
-                                        char saved = *second_redir;
-                                        *second_redir = '\0';
+                                        char saved = *redirToken;
+                                        *redirToken = '\0';
                                         redir.inputFile = strdup(redirect_pos + 1);
-                                        *second_redir = saved;
+                                        *redirToken = saved;
 
-                                        saveptr = second_redir;
+                                        saveptr = redirToken;
                                     }
                                     else{
                                         //Normal case
@@ -178,14 +176,14 @@ int main(int argc, char *argv[])
                                     free(redir.outputFile);
                                 }
 
-                                if ((second_redir = strpbrk(redirect_pos+1, "><")) != NULL)
+                                if ((redirToken = strpbrk(redirect_pos+1, "><")) != NULL)
                                 {
-                                    char saved = *second_redir;
-                                    *second_redir = '\0';
+                                    char saved = *redirToken;
+                                    *redirToken = '\0';
                                     redir.inputFile = strdup(redirect_pos + 1);
-                                    *second_redir = saved;
+                                    *redirToken = saved;
 
-                                    saveptr = second_redir;
+                                    saveptr = redirToken;
                                 }
                                 else{
                                     redir.inputFile = strdup(redirect_pos + 1);
@@ -206,14 +204,14 @@ int main(int argc, char *argv[])
                                             free(redir.outputFile);
                                         }
 
-                                        if ((second_redir = strpbrk(redirect_pos + 1, "><")) != NULL)
+                                        if ((redirToken = strpbrk(redirect_pos + 1, "><")) != NULL)
                                         {
-                                            char saved = *second_redir;
-                                            *second_redir = '\0';
+                                            char saved = *redirToken;
+                                            *redirToken = '\0';
                                             redir.outputFile = strdup(redirect_pos + 1);
-                                            *second_redir = saved;
+                                            *redirToken = saved;
 
-                                            saveptr = second_redir;
+                                            saveptr = redirToken;
                                         }
                                         else{
                                             //Normal case
@@ -233,14 +231,14 @@ int main(int argc, char *argv[])
                                         free(redir.outputFile);
                                     }
 
-                                    if ((second_redir = strpbrk(redirect_pos+1, "><")) != NULL)
+                                    if ((redirToken = strpbrk(redirect_pos+1, "><")) != NULL)
                                     {
-                                        char saved = *second_redir;
-                                        *second_redir = '\0';
+                                        char saved = *redirToken;
+                                        *redirToken = '\0';
                                         redir.outputFile = strdup(redirect_pos + 1);
-                                        *second_redir = saved;
+                                        *redirToken = saved;
 
-                                        saveptr = second_redir;
+                                        saveptr = redirToken;
                                     }
                                     else{
                                         redir.outputFile = strdup(redirect_pos + 1);
@@ -260,14 +258,14 @@ int main(int argc, char *argv[])
                                             free(redir.outputFile);
                                         }
 
-                                        if ((second_redir = strpbrk(redirect_pos+1, "><")) != NULL)
+                                        if ((redirToken = strpbrk(redirect_pos+1, "><")) != NULL)
                                         {
-                                            char saved = *second_redir;
-                                            *second_redir = '\0';
+                                            char saved = *redirToken;
+                                            *redirToken = '\0';
                                             redir.outputFile = strdup(redirect_pos + 1);
-                                            *second_redir = saved;
+                                            *redirToken = saved;
 
-                                            saveptr = second_redir;
+                                            saveptr = redirToken;
                                         }
                                         else{
                                             redir.outputFile = strdup(token);
@@ -290,14 +288,14 @@ int main(int argc, char *argv[])
                                         free(redir.outputFile);
                                     }
 
-                                    if ((second_redir = strpbrk(redirect_pos+1, "><")) != NULL)
+                                    if ((redirToken = strpbrk(redirect_pos+1, "><")) != NULL)
                                     {
-                                        char saved = *second_redir;
-                                        *second_redir = '\0';
+                                        char saved = *redirToken;
+                                        *redirToken = '\0';
                                         redir.outputFile = strdup(redirect_pos + 1);
-                                        *second_redir = saved;
+                                        *redirToken = saved;
 
-                                        saveptr = second_redir;
+                                        saveptr = redirToken;
                                     }
                                     else{
                                         redir.outputFile = strdup(redirect_pos + 1);
@@ -451,10 +449,14 @@ int main(int argc, char *argv[])
                     printf("Path: %s, Type:%d\n", cmd.path, cmd.type);
                     if (!cmd.background)
                     {
-                        waitpid(pid, &status, 0); // Wait specifically for the foreground process
-                        // while((pid = wait(&status)) != -1){
-                        //     continue; //Simply wait
-                        // }
+                        //waitpid(pid, &status, 0); // Wait specifically for the foreground process
+                        while((pidwait = wait(&status)) != -1){
+                            if(pidwait == pid){
+                                break;
+                            }
+                            //else it means other process finished
+                            continue; //Simply wait
+                        }
                     }
                     break;
                 }
@@ -611,20 +613,4 @@ command lookPath(const char *path)
     free(line);
     // Verifying it found something
     return (command){.type = -1};
-}
-
-void chilldHandler(int sig)
-{
-    int status;
-    pid_t pid;
-
-    // Reap all terminated children
-    // Wait pid to no block the program
-    // The while is  in the case many children exit an once abut system only sends one signal
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
-    {
-        //printf("Child %d terminated\n", pid);
-        //Should be printed after executing a command (like shell)
-        continue;
-    }
 }
