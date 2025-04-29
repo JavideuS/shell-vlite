@@ -364,7 +364,11 @@ int handleVariableSubstitution(char* token, shellState *shell){
     return 1;
 }
 
-int outputRedirection(char* redirect_pos, char** saveptr, shellState *shell, redirection *redir){
+int parseRedirection(char* redirect_pos, char** saveptr, shellState *shell, redirection *redir, int mode){
+    /*
+    Mode 0 -> Input redirection
+    Mode 1 -> Output redirection
+    */
     char* token;
     char* redirToken;
     char saved;
@@ -375,7 +379,12 @@ int outputRedirection(char* redirect_pos, char** saveptr, shellState *shell, red
         token = strtok_r(NULL, " ", saveptr);
         if (token != NULL)
         {
-            if (redir->outputFile != NULL)
+            //&& !mode
+            //&& mode -> alt syntax
+            if(redir->inputFile != NULL && mode == 0){
+                free(redir->inputFile);
+            }
+            else if (redir->outputFile != NULL && mode == 1)
             {
                 free(redir->outputFile);
             }
@@ -384,14 +393,24 @@ int outputRedirection(char* redirect_pos, char** saveptr, shellState *shell, red
             {
                 saved = *redirToken;
                 *redirToken = '\0';
-                redir->outputFile = strdup(redirect_pos + 1);
+                if(mode){
+                    redir->outputFile = strdup(redirect_pos + 1);
+                }
+                else{
+                    redir->inputFile = strdup(redirect_pos + 1);
+                }
                 *redirToken = saved;
 
                 *saveptr = redirToken;
             }
             else
             {
-                redir->outputFile = strdup(token);
+                if(mode){
+                    redir->outputFile = strdup(token);
+                }
+                else{
+                    redir->inputFile = strdup(token);
+                }
             }
         }
         else
@@ -408,7 +427,11 @@ int outputRedirection(char* redirect_pos, char** saveptr, shellState *shell, red
         // Verifying there's not multiple single chaining redirections in one string
         // In that case it would priotize last redirection (like in bash)
         // Although it wont create files for previous redirections (they are simply ignored)
-        if (redir->outputFile != NULL)
+        if (redir->inputFile != NULL && mode == 0)
+        {
+            free(redir->inputFile);
+        }
+        else if (redir->outputFile != NULL && mode == 1)
         {
             free(redir->outputFile);
         }
@@ -417,14 +440,28 @@ int outputRedirection(char* redirect_pos, char** saveptr, shellState *shell, red
         {
             saved = *redirToken;
             *redirToken = '\0';
-            redir->outputFile = strdup(redirect_pos + 1);
+            if (mode)
+            {
+                redir->outputFile = strdup(redirect_pos + 1);
+            }
+            else
+            {
+                redir->inputFile = strdup(redirect_pos + 1);
+            }
             *redirToken = saved;
 
             *saveptr = redirToken;
         }
         else
         {
-            redir->outputFile = strdup(redirect_pos + 1);
+            if (mode)
+            {
+                redir->outputFile = strdup(redirect_pos + 1);
+            }
+            else
+            {
+                redir->inputFile = strdup(redirect_pos + 1);
+            }
         }
     }
     return 1;
@@ -432,8 +469,8 @@ int outputRedirection(char* redirect_pos, char** saveptr, shellState *shell, red
 //In order to modify context token and saveptr need to be passed as double pointer (by reference)
 int redirectionHandler(char* token, char** saveptr, char *redirect_pos, shellState *shell, redirection *redir){
     int index = redirect_pos - token;
-    char* redirToken;
     char saved;
+
     if (index > 0)
     {
         // There's text before the <
@@ -445,64 +482,9 @@ int redirectionHandler(char* token, char** saveptr, char *redirect_pos, shellSta
 
     if (redirect_pos[0] == '<')
     {
-        if (redirect_pos[1] == '\0')
-        {
-            // Format: "<" - need next token as filename
-            token = strtok_r(NULL, " ", saveptr);
-            if (token != NULL)
-            {
-                if (redir->inputFile != NULL)
-                {
-                    free(redir->inputFile);
-                }
-
-                if ((redirToken = strpbrk(redirect_pos + 1, "><")) != NULL)
-                {
-                    saved = *redirToken;
-                    *redirToken = '\0';
-                    redir->inputFile = strdup(redirect_pos + 1);
-                    *redirToken = saved;
-
-                    *saveptr = redirToken;
-                }
-                else
-                {
-                    // Normal case
-                    redir->inputFile = strdup(token);
-                }
-            }
-            else
-            {
-                printf("error: missing file for redirection\n");
-                //break;
-                return 0;
-            }
-        }
-        else
-        {
-            // Format: "<file" - filename is in this token
-            // Verifying there's not multiple single chaining redirections in one string
-            // In that case it would prioritize last redirection (like in bash)
-            // Although it wont create files for previous redirections (they are simply ignored)
-            // Different behavior than bash
-            if (redir->inputFile != NULL)
-            {
-                free(redir->inputFile);
-            }
-
-            if ((redirToken = strpbrk(redirect_pos + 1, "><")) != NULL)
-            {
-                saved = *redirToken;
-                *redirToken = '\0';
-                redir->inputFile = strdup(redirect_pos + 1);
-                *redirToken = saved;
-
-                *saveptr = redirToken;
-            }
-            else
-            {
-                redir->inputFile = strdup(redirect_pos + 1);
-            }
+        if(!outputRedirection(redirect_pos, saveptr, shell, redir,0)){
+            // This means error in redirection
+            return 0;
         }
     }
     else
@@ -510,7 +492,7 @@ int redirectionHandler(char* token, char** saveptr, char *redirect_pos, shellSta
         if (redirect_pos[1] == '>')
         {
             redir->appendMode = 1;
-            if(!outputRedirection(redirect_pos+1, saveptr, shell, redir)){
+            if(!outputRedirection(redirect_pos+1, saveptr, shell, redir,1)){
                 // This means error in redirection
                 return 0;
             }
@@ -518,7 +500,7 @@ int redirectionHandler(char* token, char** saveptr, char *redirect_pos, shellSta
         else
         {
             redir->appendMode = 0;
-            if(!outputRedirection(redirect_pos, saveptr, shell, redir)){
+            if(!outputRedirection(redirect_pos, saveptr, shell, redir,1)){
                 // This means error in redirection
                 return 0;
             }
