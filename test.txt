@@ -1,0 +1,152 @@
+# Shell Test Script
+
+# Basic command execution
+echo "Test 1: Basic command execution"
+ls
+echo ""
+
+# Command with arguments
+echo "Test 2: Command with arguments"
+ls -la
+echo ""
+
+# Non-existent command (should show error)
+echo "Test 3: Non-existent command (should show error)"
+nonexistentcommand
+echo ""
+
+# Built-in cd command
+echo "Test 4: Built-in cd command"
+cd /tmp
+pwd
+echo ""
+
+# cd without arguments (should go to HOME)
+echo "Test 5: cd without arguments (should go to HOME)"
+cd
+pwd
+echo ""
+
+# Environment variable assignment
+echo "Test 6: Environment variable assignment"
+test_var=hello_world
+echo $test_var
+echo ""
+
+# Environment variable substitution
+echo "Test 7: Environment variable substitution"
+cmd=echo
+arg="Environment variable substitution works!"
+$cmd $arg
+echo ""
+
+# Error for non-existent environment variable
+echo "Test 8: Error for non-existent environment variable"
+echo $nonexistent_var
+echo ""
+
+# Multiple spaces between command and arguments (should work)
+echo "Test 9: Multiple spaces between command and arguments"
+ls     -l      /tmp
+echo ""
+
+# Input redirection
+echo "Test 10: Input redirection"
+echo "This is a test file for input redirection" > /tmp/test_input.txt
+cat < /tmp/test_input.txt
+echo ""
+
+# Output redirection
+echo "Test 11: Output redirection"
+ls -l > /tmp/test_output.txt
+echo "Content of /tmp/test_output.txt:"
+cat /tmp/test_output.txt
+echo ""
+
+# Background execution
+echo "Test 12: Background execution"
+sleep 2 &
+echo "This should print immediately while sleep runs in background"
+echo ""
+
+# Background execution with input/output redirection
+echo "Test 13: Background execution with input/output redirection"
+cat < /tmp/test_input.txt > /tmp/test_bg_output.txt &
+echo "cat should be running in background"
+sleep 1
+echo "Content of /tmp/test_bg_output.txt:"
+cat /tmp/test_bg_output.txt
+echo ""
+
+# Cleanup test files
+rm /tmp/test_input.txt
+rm /tmp/test_output.txt
+rm /tmp/test_bg_output.txt
+
+# Optional I: Here document
+echo "Test 14: Here document (Optional I)"
+wc -l HERE{
+Line 1
+Line 2
+Line 3
+}
+echo ""
+
+# Optional II: result variable and ifok/ifnot
+echo "Test 15: result variable (Optional II)"
+ls /tmp
+echo "Result of ls /tmp command: $result"
+echo ""
+
+echo "Test 16: ifok command (Optional II)"
+test -e /tmp
+ifok echo "The directory /tmp exists"
+echo ""
+
+echo "Test 17: ifok command with failure (Optional II)"
+test -e /nonexistent_directory
+ifok echo "This should not be printed"
+echo ""
+
+echo "Test 18: ifnot command (Optional II)"
+test -e /nonexistent_directory
+ifnot echo "The directory /nonexistent_directory does not exist"
+echo ""
+
+echo "Test 19: ifnot command with success (Optional II)"
+test -e /tmp
+ifnot echo "This should not be printed"
+echo ""
+
+# Comprehensive test combining multiple features
+echo "Test 20: Comprehensive test"
+tmp_dir=/tmp
+$tmp_dir=nonexistent # This should show an error as $tmp_dir resolves to /tmp
+echo "If you see this, variable substitution is not working correctly!"
+echo ""
+
+# Complex test with redirections and environment variables
+echo "Test 21: Complex test with redirections and environment variables"
+dir=/tmp
+command=ls
+options="-la"
+$command $options $dir > /tmp/complex_output.txt
+cat < /tmp/complex_output.txt
+rm /tmp/complex_output.txt
+echo ""
+
+# Test correct waiting behavior
+echo "Test 22: Testing waiting behavior"
+echo "Starting 3-second sleep..."
+sleep 3
+echo "Sleep completed. If this message appears immediately after the previous one, your shell is not waiting correctly."
+echo ""
+
+# Test background execution non-waiting behavior
+echo "Test 23: Testing background non-waiting behavior"
+echo "Starting 3-second sleep in background..."
+sleep 3 &
+echo "This should appear immediately, without waiting for sleep to complete."
+echo ""
+
+echo "All tests completed!"
